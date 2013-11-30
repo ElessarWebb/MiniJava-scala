@@ -33,6 +33,12 @@ package parser {
 	case class BinExp( op: BinOp, left: Exp, right: Exp ) extends Exp
 	case class UnExp( op: UnOp, right: Exp ) extends Exp
 
+	// toplevel
+	case class Program(
+		main: MainClass,
+		classes: List[ClassDecl]
+	) extends Term
+
 	// statements
 	case class IfStmt(
 		cond: Exp,

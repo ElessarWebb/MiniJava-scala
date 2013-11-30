@@ -5,7 +5,7 @@ import scala.util.parsing.combinator._
 /**
  * Defines parsers for all minijava terminals
  */
-trait MJLiteralParsers extends RegexParsers {
+trait LiteralParsers extends RegexParsers {
 	// literals
 	def int: Parser[Int] = "[-]?[0-9]+".r ^^ { _.toInt }
 	def id: Parser[String] = not( reserved ) ~> "[a-zA-Z][a-zA-Z0-9_]*".r
@@ -36,15 +36,18 @@ trait MJLiteralParsers extends RegexParsers {
 	}
 }
 
-object ExpressionParser extends MJExpParsers {
-	def apply( input: String ) = parseAll( exp, input )
+object ExpressionParser extends ExpParsers {
+	def apply( input: String ): Option[Exp] = super.parseAll( exp, input ) match {
+		case Success( exp, _ ) => Some(exp)
+		case _ => None
+	}
 }
 
 /**
  * Parses a minijava expression
  * Operator precedence (high to low): !, *, (+,-), <, &&
  */
-trait MJExpParsers extends MJLiteralParsers {
+trait ExpParsers extends LiteralParsers {
 	def intval = int ^^ { x => IntValue( x ) }
 	def boolval = ( true_kw | false_kw ) ^^ {
 		case "true" => True
@@ -87,10 +90,10 @@ trait MJExpParsers extends MJLiteralParsers {
 	def exp:Parser[Exp] = exp_land
 }
 
-trait MJParsers extends MJLiteralParsers with MJExpParsers {
+trait Parsers extends LiteralParsers with ExpParsers {
 
 	// goal
-	def program = mainclass ~ rep(classdecl)
+	def program = mainclass ~ rep(classdecl) ^^ { case main ~ classes => Program( main, classes ) }
 
 	def typ: Parser[Type] = {
 			"int" ~ "[" ~ "]" ^^ { _ => TIntArray } |
@@ -172,6 +175,11 @@ trait MJParsers extends MJLiteralParsers with MJExpParsers {
 	}
 }
 
-object MJParser extends MJParsers {
-	def apply( input: String ) = parseAll( program, input )
+object Parser extends Parsers {
+	def apply( input: String ): Option[Program] = {
+		parseAll( program, input ) match {
+			case Success( program, _ ) => Some(program)
+			case _ => None
+		}
+	}
 }
