@@ -4,6 +4,8 @@ import minijava.parser._
 
 trait ParserSpec extends Matchers {
 
+	class ParseException extends Exception
+
 	protected def parse( s:String ): Term
 
 	/**
@@ -26,7 +28,7 @@ trait ParserSpec extends Matchers {
 	/**
 	 * A negative test case helper for parsers
 	 */
-	protected def negative( input:String ) = intercept[IllegalArgumentException] {
+	protected def negative( input:String ) = intercept[ParseException] {
 		parse( input )
 	}
 }
@@ -36,7 +38,7 @@ class ExpParsersSpec extends FlatSpec with ParserSpec with Matchers {
 	protected def parse( s:String ): Exp = {
 		ExpressionParser( s ) match {
 			case Some( exp ) => exp
-			case _ => throw new IllegalArgumentException( "Failed to parse input" )
+			case _ => throw new ParseException()
 		}
 	}
 
