@@ -25,6 +25,7 @@ package parser {
 	case object TBool extends Type
 	case object TInt extends Type
 	case object TIntArray extends Type
+	case object Void extends Type
 	case class TClass(id: String) extends Type
 
 	// more literals
