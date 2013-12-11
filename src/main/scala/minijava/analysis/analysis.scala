@@ -81,24 +81,29 @@ object NameAnalysis {
 			// verify that types are defined in var decl
 			case VarDecl(TClass(c),exp) => check(
 				check_def(term, NSClass, c),
-				Failure(s"Uhm, the type `$c` is not defined")
+				Failure(s"Uhm, missing definition of type `$c`")
 			)
 
 			// verify that types are defined in field decl
 			case Field(TClass(c), exp) => check(
 				check_def(term, NSClass, c),
-				Failure(s"Uhm, the type `$c` is not defined")
+				Failure(s"Uhm, missing definition of type `$c`")
 			)
 
 			// verify that all names in expressions are declared
 			case Ref(x) => check(
-				check_def(term, NSVar, x),
+				check_def(term, NSVar, x) || check_def(term, NSField, x) ,
 				Failure(s"Referring to undeclared variable $x")
 			)
 
 			case NewObject(c) => check(
 				check_def(term, NSClass, c),
-				Failure(s"No definition of class $c found.")
+				Failure(s"Missing definition of class $c found.")
+			)
+
+			case Param(TClass(c),_) => check(
+				check_def(term, NSClass, c),
+				Failure(s"Missing definition of class $c found.")
 			)
 
 			case _ => analyze( term.children() )
