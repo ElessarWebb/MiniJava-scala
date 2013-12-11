@@ -1,7 +1,6 @@
 package minijava {
 
 package parser {
-	import scala.reflect.runtime.universe._
 
 	sealed trait Term {
 		def children(): List[Term] = Nil

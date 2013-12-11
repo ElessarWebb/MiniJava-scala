@@ -67,13 +67,15 @@ trait ExpParsers extends LiteralParsers {
 
 	def simpleterm: Parser[Exp] = intval | boolval | ref | self
 
-	def call: Parser[Exp] = ( simpleterm <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
-		case ( obj ) ~ id ~ ( args ) => Call( obj, id, args )
-	}
-	def not_term: Parser[Exp] = op_not ~> simpleterm ^^ { x => UnExp( Neg, x ) }
-	def term: Parser[Exp] = simpleterm | not_term | ( "(" ~> exp <~ ")" )
+	def term: Parser[Exp] = ( "(" ~> exp <~ ")" ) | simpleterm
 
-	def exp_mul = term ~ rep( op_mul ~> term ) ^^ {
+	def call: Parser[Exp] = ( term <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
+		case ( obj ) ~ id ~ ( args ) => Call( obj, id, args )
+	} | term
+
+	def not_term: Parser[Exp] = op_not ~> call ^^ { x => UnExp( Neg, x ) } | call
+
+	def exp_mul = not_term ~ rep( op_mul ~> not_term ) ^^ {
 		case left ~ rights => rights.foldLeft( left ) { ( acc, r ) => BinExp( Mul, acc, r )}
 	}
 

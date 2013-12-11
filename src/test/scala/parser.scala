@@ -73,6 +73,26 @@ class ExpParsersSpec extends FlatSpec with ParserSpec with Matchers {
 	it should "parse calls without params" in {
 		positive( "this.something()" ) { case Call( _, "something", Nil ) => true }
 	}
+
+	it should "parse calls with a single param" in {
+		positive( "this.something( 3 )" ) { case Call( _, "something", List( IntValue( 3 ))) => true }
+	}
+
+	it should "parse calls with multiple param" in {
+		positive( "this.something( 3, 4, 5 )" ) { case Call( _, "something", List( _, _, _ )) => true }
+	}
+
+	it should "parse calls with multiple complex param" in {
+		positive( "this.something( 3, 4 * 5 + !true, 5 )" ) { case Call( _, "something", List( _, _, _ )) => true }
+	}
+
+	it should "parse nested calls" in {
+		positive( "this.something( 3, that.another(), 5 )" ) { case Call(
+			_,
+			"something",
+			List( _, Call( _, "another", _ ), _ )
+		) => true }
+	}
 }
 
 class MiniJavaParserSpec extends FlatSpec with ParserSpec with Matchers {
@@ -80,7 +100,7 @@ class MiniJavaParserSpec extends FlatSpec with ParserSpec with Matchers {
 	protected def parse( s:String ): Program = {
 		Parser( s ) match {
 			case Some( program ) => program
-			case _ => throw new IllegalArgumentException( "Failed to parse input" )
+			case _ => throw new ParseException()
 		}
 	}
 
