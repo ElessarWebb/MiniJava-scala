@@ -2,34 +2,40 @@ package minijava.analysis
 
 import minijava.parser._
 
-import scala.collection.immutable.{HashMap, Map}
+import scala.collection.{mutable,immutable}
 import scala.annotation.tailrec
+import minijava.utils.{StackTrace, CompileException}
 
 sealed class Namespace
 case object NSClass extends Namespace
 case object NSMethod extends Namespace
 case object NSField extends Namespace
 case object NSVar extends Namespace
+case object NSThis extends Namespace
 
-sealed class Record()
-
-case object Usage extends Record
-case class Declaration(
+case class Record(
 	definition: Term,
 	typ: Type
-) extends Record
+)
 
-object EmptyScope extends Scope( None, Nil )
+object Record {
+	implicit def rec_to_term( rec: Record ): Term = rec.definition
+	implicit def rec_to_type( rec: Record ): Type = rec.typ
+}
+
 class Scope(
 	val parent: Option[ Scope ],
 	val scopes: List[ Namespace ],
 
 	// represents the actual (local) symbol-table
-	val symbols: Map[ (Namespace, String), Record ] = new HashMap()
-	) extends Immutable {
+	val symbols: mutable.Map[ (Namespace, String), Record ] = new mutable.HashMap()
+	) {
 
-	def add( ns: Namespace, id: String, record: Record ): Scope =
-		new Scope(parent, scopes, symbols + Tuple2((ns, id), record ))
+	// TODO: How would you deal with updating scopes when using immutability?
+	def add( ns: Namespace, id: String, record: Record ): Scope = {
+		symbols += Tuple2((ns, id), record )
+		this
+	}
 
 	/* Look up a name in the local scope
 	 */
@@ -62,7 +68,7 @@ class Scope(
 class SymbolTable(
 	val root: Scope,
 	val current: Scope,
-	val term_in_scope: HashMap[ Term, Scope ] = new HashMap()
+	val term_in_scope: immutable.HashMap[ Term, Scope ] = new immutable.HashMap()
 	) extends Immutable {
 
 	/**
@@ -74,8 +80,8 @@ class SymbolTable(
 	 * @param typ Type of id
 	 */
 	def declare(ns: Namespace, id: String, term: Term, typ: Type) = {
-		val nextctx = current.add(ns, id, Declaration(term, typ))
-		new SymbolTable(root, nextctx, term_in_scope + Tuple2(term, current))
+		val nextctx = current.add(ns, id, Record(term, typ))
+		new SymbolTable(root, nextctx, term_in_scope + Tuple2(term, nextctx))
 	}
 
 	/**
@@ -113,7 +119,7 @@ class SymbolTable(
 object SymbolTable {
 
 	def build( root: Term ): SymbolTable = {
-		val rootctx = EmptyScope
+		val rootctx = new Scope( None, Nil )
 		build( root, new SymbolTable( rootctx, rootctx ))
 	}
 
@@ -131,24 +137,37 @@ object SymbolTable {
 			}
 
 		case c@ClassDecl(id,parent,fields,methods) =>
+			val clsst = parent match {
+				case Some(p) => TClass(p)
+				case None => TTop
+			}
+
 			// recurse on children
 			build(
 				fields ::: methods,
-				ctx .declare(NSClass, id, c, Void)
+				ctx .declare(NSClass, id, c, clsst)
+					.declare(NSThis, "this", c, TClass(id) )
 					.enter_scope(List(NSField, NSMethod))
-			)
+			).leave_scope()
 
 		case f@Field(typ,name) => ctx.declare(NSField, name, f, typ)
 
 		case m@MethodDecl(typ,name,params,vardecls,body,retexp) =>
+			// lookup the enclosing class
+			val self = ctx.current.lookup_lexical( NSThis, "this" ) match {
+				case Some(Record(ClassDecl(cname,_,_,_),_)) => cname
+				case _ => throw new CompileException( s"Could not find enclosing class of method `$name`" )
+			}
+
 			// declare the method in the parent scope
 			// and enter method scope
 			val decl =
-				ctx	.declare(NSMethod, name, m, typ)
+				ctx	.declare(NSMethod, s"$self.$name", m, typ)
 					.enter_scope(List(NSVar))
 
 			// recurse on children
-			build( params ::: vardecls ::: ( body :+ retexp ), decl )
+			// and leave the method scope again
+			build( params ::: vardecls ::: ( body :+ retexp ), decl ).leave_scope()
 
 		case p@Param(typ,name) => ctx.declare(NSVar,name,p,typ)
 
@@ -166,39 +185,101 @@ object SymbolTable {
 }
 
 abstract sealed class AnalysisResult {
-	def and( right: AnalysisResult ): AnalysisResult
+	def and(right: AnalysisResult): AnalysisResult
 }
 
 case object Success extends AnalysisResult {
-	def and( right: AnalysisResult ) = right match {
+
+	def and(right: AnalysisResult) = right match {
 		case Success => Success
-		case Failure => Failure
+		case r: Failure => r
+	}
+
+}
+
+case class Failure(msg: String, next: Option[ Failure ] = None) extends AnalysisResult {
+
+	implicit def failToOpt(f: Failure) = Some(f)
+
+	def and(right: AnalysisResult) = right match {
+		case f: Failure => Failure(msg, f)
+		case Success => this
+	}
+
+	override def toString: String = {
+		val s = s"$msg"
+		val more = len() - 1
+
+		if( more > 0 ) {
+			s + s" ($more more)"
+		} else s
+	}
+
+	private def len(): Int = next match {
+		case Some(f) => 1 + f.len()
+		case None => 1
+	}
+
+	def msgs(): List[String] = this.next match {
+		case Some(f) => msg :: f.msgs()
+		case _ => List( msg )
 	}
 }
 
-case object Failure extends AnalysisResult {
-	def and( right: AnalysisResult ) = Failure
-}
+object NameAnalysis {
 
-object SemanticAnalysis {
+	def apply(term: Term, symbols: SymbolTable): AnalysisResult = analyze(term)(symbols)
 
-	def check_type(ctx: Scope, root: Term): AnalysisResult = root match {
-		case Program( main, classes ) => {
-			// forward declare all classes
-			val ctxext = classes.foldLeft(ctx) {
-				(r, c) => ctx.add(NSClass, c.id, Void)
+	def check_def( term: Term, ns: Namespace, name: String)(implicit table: SymbolTable): Boolean = {
+		// get the scope
+		table.get_scope_of(term) match {
+			// verify the name is defined in the given scope
+			case Some(s) => s.lookup_lexical(ns, name) match {
+				case Some(d) => true
+				case _ => false
 			}
-
-			// now check the child terms
-			check_type(ctx, main) and check_type( ctx, classes )
+			case _ => true
 		}
-
-		case ClassDecl(_,_,_,_) => Failure
-		case _ => Success
 	}
 
-	def check_type(ctx: Scope, roots: List[Term]): AnalysisResult =
-		roots.foldLeft[AnalysisResult]( Success ) { (r,el) => r and check_type( ctx, el )}
+	def analyze(terms: List[ Term ])(implicit table: SymbolTable): AnalysisResult = {
+		terms.foldLeft[ AnalysisResult ](Success) {
+			(r, t) => r and analyze(t)
+		}
+	}
 
-	def apply(root: Term, symbols: HashMap[ String, Term ]): AnalysisResult = Success
+	private def check( v: Boolean, f: Failure ) = if( !v ) f else Success
+
+	def analyze(term: Term)(implicit symbols: SymbolTable): AnalysisResult = {
+		term match {
+
+			// verify parent class is defined
+			case c@ClassDecl(_, Some(parent), _, _) =>
+				check(
+					check_def(term, NSClass, parent),
+					Failure(s"Woops, missing definition of $parent")
+				) and analyze(c.children())
+
+			// verify that types are defined in var decl
+			case VarDecl(TClass(c),exp) => check(
+				check_def(term, NSClass, c),
+				Failure(s"Uhm, the type `$c` is not defined")
+			)
+
+			// verify that types are defined in field decl
+			case Field(TClass(c), exp) => check(
+				check_def(term, NSClass, c),
+				Failure(s"Uhm, the type `$c` is not defined")
+			)
+
+			// verify that all names in expressions are declared
+			case Ref(x) => check(
+				check_def(term, NSVar, x),
+				Failure(s"Referring to undeclared variable $x")
+			)
+
+			case _ => analyze( term.children() )
+		}
+	}
+
 }

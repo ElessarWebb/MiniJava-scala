@@ -21,6 +21,7 @@ trait LiteralParsers extends RegexParsers {
 	def true_kw: Parser[String] = "true"
 	def false_kw: Parser[String] = "false"
 	def println_kw = "System" ~ "." ~ "out" ~ "." ~ "println"
+	def this_kw = "this"
 
 	//
 	def reserved = {
@@ -32,7 +33,8 @@ trait LiteralParsers extends RegexParsers {
 		if_kw |
 		else_kw |
 		true_kw |
-		false_kw
+		false_kw |
+		this_kw
 	}
 }
 
@@ -45,7 +47,7 @@ object ExpressionParser extends ExpParsers {
 
 /**
  * Parses a minijava expression
- * Operator precedence (high to low): !, *, (+,-), <, &&
+ * Operator precedence (high to low): (call), !, *, (+,-), <, &&
  */
 trait ExpParsers extends LiteralParsers {
 	def intval = int ^^ { x => IntValue( x ) }
@@ -60,8 +62,14 @@ trait ExpParsers extends LiteralParsers {
 	def op_minus = "-" ^^ { _ => Minus }
 	def op_mul = "*" ^^ { _ => Mul }
 	def op_lt = "<" ^^ { _ => Lt }
+	def ref = id ^^ { Ref }
+	def self = this_kw ^^ { _ => This }
 
-	def simpleterm: Parser[Exp] = intval | boolval
+	def simpleterm: Parser[Exp] = intval | boolval | ref | self
+
+	def call: Parser[Exp] = ( simpleterm <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
+		case ( obj ) ~ id ~ ( args ) => Call( obj, id, args )
+	}
 	def not_term: Parser[Exp] = op_not ~> simpleterm ^^ { x => UnExp( Neg, x ) }
 	def term: Parser[Exp] = simpleterm | not_term | ( "(" ~> exp <~ ")" )
 

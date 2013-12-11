@@ -28,6 +28,7 @@ package parser {
 	case object TIntArray extends Type
 	case object Void extends Type
 	case class TClass(id: String) extends Type
+	case object TTop extends Type
 
 	// expressions
 	case object True extends Exp
@@ -143,16 +144,11 @@ package parser {
 		override def children() = List( exp )
 	}
 
-	case class Assign(
-		vid: String,
-		exp: Exp
-		) extends Statement {
-
-		override def children() = List( exp )
-	}
-
 	// expressions
 	case class IntValue( value: Int ) extends Exp
+	case class Ref( id: String ) extends Exp
+	case class Call( obj: Exp, name: String, args: List[Exp] ) extends Exp
+	case object This extends Exp
 
 	} // end of parser package
 } // end of minijava package
