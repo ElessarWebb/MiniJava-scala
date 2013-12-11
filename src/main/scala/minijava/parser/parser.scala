@@ -109,7 +109,7 @@ trait Parsers extends LiteralParsers with ExpParsers {
 	private def decl = typ ~ id
 
 	def field: Parser[Field] = decl <~ ";" ^^ {
-		case t ~ id => VarDecl( t, id )
+		case t ~ id => Field( t, id )
 	}
 
 	def vardecl = decl <~ ";" ^^ { case t ~ i => VarDecl( t, i ) }
