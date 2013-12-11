@@ -93,6 +93,26 @@ class ExpParsersSpec extends FlatSpec with ParserSpec with Matchers {
 			List( _, Call( _, "another", _ ), _ )
 		) => true }
 	}
+
+	it should "parse object creations" in {
+		positive( "new A()" ) { case NewObject( "A" ) => true }
+	}
+
+	it should "not parse object creation with arguments" in {
+		negative( "new A( 3 )" )
+	}
+
+	it should "parse array creation" in {
+		positive( "new int[ 3 ]" ) { case NewArray( IntValue( 3 )) => true }
+	}
+
+	it should "not parse array creations without index exp" in {
+		negative( "new int[]" )
+	}
+
+	it should "parse array creation with complex expressions" in {
+		positive( "new int[ 3 + 8 * 4 * a.b() ]" ) { case NewArray( _ ) => true }
+	}
 }
 
 class MiniJavaParserSpec extends FlatSpec with ParserSpec with Matchers {

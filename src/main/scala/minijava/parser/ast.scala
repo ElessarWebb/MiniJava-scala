@@ -144,9 +144,20 @@ package parser {
 	}
 
 	// expressions
-	case class IntValue( value: Int ) extends Exp
-	case class Ref( id: String ) extends Exp
-	case class Call( obj: Exp, name: String, args: List[Exp] ) extends Exp
+	case class IntValue(value: Int) extends Exp
+
+	case class Ref(id: String) extends Exp
+
+	case class Call(obj: Exp, name: String, args: List[ Exp ]) extends Exp {
+		override def children() = obj :: args
+	}
+
+	case class NewObject(id: String) extends Exp
+
+	case class NewArray(index: Exp) extends Exp {
+		override def children() = List(index)
+	}
+
 	case object This extends Exp
 
 	} // end of parser package

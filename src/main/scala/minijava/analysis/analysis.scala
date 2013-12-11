@@ -96,6 +96,11 @@ object NameAnalysis {
 				Failure(s"Referring to undeclared variable $x")
 			)
 
+			case NewObject(c) => check(
+				check_def(term, NSClass, c),
+				Failure(s"No definition of class $c found.")
+			)
+
 			case _ => analyze( term.children() )
 		}
 	}

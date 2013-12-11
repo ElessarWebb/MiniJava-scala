@@ -22,6 +22,7 @@ trait LiteralParsers extends RegexParsers {
 	def false_kw: Parser[String] = "false"
 	def println_kw = "System" ~ "." ~ "out" ~ "." ~ "println"
 	def this_kw = "this"
+	def new_kw = "new"
 
 	//
 	def reserved = {
@@ -65,20 +66,30 @@ trait ExpParsers extends LiteralParsers {
 	def ref = id ^^ { Ref }
 	def self = this_kw ^^ { _ => This }
 
-	def simpleterm: Parser[Exp] = intval | boolval | ref | self
+	// atoms
+	def simple_term: Parser[Exp] = intval | boolval | ref | self
 
-	def term: Parser[Exp] = ( "(" ~> exp <~ ")" ) | simpleterm
+	// level 0 precedence
+	def term_0: Parser[Exp] = ( "(" ~> exp <~ ")" ) | simple_term
 
-	def call: Parser[Exp] = ( term <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
+	// level 1 precedence
+	def term_1: Parser[Exp] = ( term_0 <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
 		case ( obj ) ~ id ~ ( args ) => Call( obj, id, args )
-	} | term
+	} | term_0
 
-	def not_term: Parser[Exp] = op_not ~> call ^^ { x => UnExp( Neg, x ) } | call
+	def create_array: Parser[Exp] = new_kw ~> "int" ~> "[" ~> exp <~ "]" ^^ { case exp => NewArray(exp) }
+	def create_obj: Parser[Exp] = new_kw ~> id <~ ( "(" ~ ")" ) ^^ { case id => NewObject( id ) }
+	def not_term: Parser[Exp] = op_not ~> term_1 ^^ { x => UnExp( Neg, x ) }
 
-	def exp_mul = not_term ~ rep( op_mul ~> not_term ) ^^ {
+	// level 2 precedence
+	def term_2: Parser[Exp] = create_array | create_obj | not_term | term_1
+
+	// level 3 precedence
+	def exp_mul = term_2 ~ rep( op_mul ~> term_2 ) ^^ {
 		case left ~ rights => rights.foldLeft( left ) { ( acc, r ) => BinExp( Mul, acc, r )}
 	}
 
+	// level 4 precedence
 	def exp_sum: Parser[Exp] = exp_mul ~ rep(( op_plus | op_minus ) ~ exp_mul ) ^^ {
 		case left ~ rights => rights.foldLeft( left ) { ( acc, r ) =>
 			r match {
@@ -87,12 +98,13 @@ trait ExpParsers extends LiteralParsers {
 		}
 	}
 
-	// a < b < c is not supported
+	// level 5 precedence
 	def exp_lt: Parser[Exp] = exp_sum ~ ( op_lt ~> exp_sum ).? ^^ {
 		case left ~ Some(right) => BinExp( Lt, left, right )
 		case left ~ None => left
 	}
 
+	// level 6 precedence
 	def exp_land = exp_lt ~ rep( op_and ~> exp_lt ) ^^ {
 		case left ~ rights => rights.foldLeft( left ) { ( acc, r ) => BinExp( LAnd, acc, r )}
 	}
