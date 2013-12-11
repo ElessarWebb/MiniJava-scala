@@ -69,6 +69,10 @@ class ExpParsersSpec extends FlatSpec with ParserSpec with Matchers {
 	it should "precede braced subexpressions" in {
 		positive( "( 3 + 4 ) * 5" ) { case BinExp( Mul, _, _ ) => true }
 	}
+
+	it should "parse calls without params" in {
+		positive( "this.something()" ) { case Call( _, "something", Nil ) => true }
+	}
 }
 
 class MiniJavaParserSpec extends FlatSpec with ParserSpec with Matchers {
