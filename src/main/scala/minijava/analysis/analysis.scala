@@ -44,9 +44,22 @@ case class Failure(msg: String, next: Option[ Failure ] = None) extends Analysis
 	}
 }
 
+object SemanticAnalysis {
+
+	def apply(term: Term, symbols: SymbolTable): AnalysisResult = {
+		term.foldDown[ AnalysisResult ](Success) {
+			// perform name analysis on this node
+			// and combine the results
+			(r, t) => r and NameAnalysis.analyze(t)(symbols)
+		}
+	}
+}
+
 object NameAnalysis {
 
 	def apply(term: Term, symbols: SymbolTable): AnalysisResult = analyze(term)(symbols)
+
+	private def check( v: Boolean, f: Failure ) = if( !v ) f else Success
 
 	def check_def( term: Term, ns: Namespace, name: String)(implicit table: SymbolTable): Boolean = {
 		// get the scope
@@ -66,9 +79,8 @@ object NameAnalysis {
 		}
 	}
 
-	private def check( v: Boolean, f: Failure ) = if( !v ) f else Success
-
 	def analyze(term: Term)(implicit symbols: SymbolTable): AnalysisResult = {
+
 		term match {
 
 			// verify parent class is defined
@@ -76,7 +88,7 @@ object NameAnalysis {
 				check(
 					check_def(term, NSClass, parent),
 					Failure(s"Woops, missing definition of $parent")
-				) and analyze(c.children())
+				)
 
 			// verify that types are defined in var decl
 			case VarDecl(TClass(c),exp) => check(
@@ -106,7 +118,7 @@ object NameAnalysis {
 				Failure(s"Missing definition of class $c found.")
 			)
 
-			case _ => analyze( term.children() )
+			case _ => Success
 		}
 	}
 }

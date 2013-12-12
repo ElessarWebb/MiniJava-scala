@@ -1,7 +1,10 @@
+import minijava.analysis.Failure
+import minijava.parser.Program
 import minijava.parser.{IntValue, Program, Parser}
 import org.scalatest._
 import org.scalatest.exceptions.TestFailedException
-import minijava.analysis.{Failure, Success, NameAnalysis, SymbolTable}
+import minijava.analysis._
+import scala.Some
 
 trait AnalyzerSpec extends Matchers {
 
@@ -32,13 +35,13 @@ class NameAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 	behavior of "The name analyzer"
 
 	def negative( input: String, substr: String = "") = {
-		val result = NameAnalysis.apply _ tupled setup( input )
+		val result = SemanticAnalysis.apply _ tupled setup( input )
 		result shouldBe a [Failure]
 		result.asInstanceOf[ Failure ].msg.toLowerCase should include ( substr.toLowerCase )
 	}
 
 	def positive( input: String ) = {
-		(NameAnalysis.apply _ tupled setup( input )) should equal (Success)
+		(SemanticAnalysis.apply _ tupled setup( input )) should equal (Success)
 	}
 
 	it should "fail on undefined parents" in {

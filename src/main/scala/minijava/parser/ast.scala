@@ -4,6 +4,33 @@ package parser {
 
 	sealed trait Term {
 		def children(): List[Term] = Nil
+
+		/**
+		 * Fold operation on an AST.
+		 * First processes this node, than it's children from left to right, recursively
+		 * @param z initial value
+		 * @param f fold function
+		 */
+		def foldDown[ A ](z: A)( f: (A, Term) => A): A = {
+			this.children().foldLeft[ A ](f(z, this)) {
+				(r: A, t) => t.foldDown(r)(f)
+			}
+		}
+
+		/**
+		 * Fold operation on an AST.
+		 * First processes it's children from left to right, recursively, then itself
+		 * @param z initial value
+		 * @param f fold function
+		 */
+		def foldUp[ A ](z: A)( f: (A, Term) => A): A = {
+			f(
+				this.children().foldLeft[ A ](z) {
+					(r: A, t) => t.foldDown(r)(f)
+				},
+				this
+			)
+		}
 	}
 
 	sealed abstract class Statement extends Term
