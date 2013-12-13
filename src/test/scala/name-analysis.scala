@@ -1,25 +1,5 @@
-import minijava.analysis.Failure
-import minijava.parser.Program
-import minijava.parser.{IntValue, Program, Parser}
 import org.scalatest._
-import org.scalatest.exceptions.TestFailedException
 import minijava.analysis._
-import scala.Some
-
-trait AnalyzerSpec extends Matchers {
-
-	/**
-	 * Return a common header for all your tests
-	 */
-	val header: String = ""
-
-	protected def setup( input: String ): ( Program, SymbolTable )  = {
-		Parser( header + input ) match {
-			case Some(p:Program) => ( p, SymbolTable.build( p ))
-			case _ => throw new TestFailedException( "Sorry, test input won't parse as program", 1 )
-		}
-	}
-}
 
 class NameAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 
@@ -34,14 +14,13 @@ class NameAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 
 	behavior of "The name analyzer"
 
-	def negative( input: String, substr: String = "") = {
-		val result = SemanticAnalysis.apply _ tupled setup( input )
-		result shouldBe a [Failure]
-		result.asInstanceOf[ Failure ].msg.toLowerCase should include ( substr.toLowerCase )
-	}
-
-	def positive( input: String ) = {
-		(SemanticAnalysis.apply _ tupled setup( input )) should equal (Success)
+	override protected def exec( input: String ): AnalysisResult = {
+		val inp = setup( input )
+		inp._1.foldDown[ AnalysisResult ](Success) {
+			// perform name analysis on this node
+			// and combine the results
+			(r, t) => r and NameAnalyzer.analyze(t)(inp._2)
+		}
 	}
 
 	it should "fail on undefined parents" in {

@@ -18,8 +18,32 @@ case class Record(
 	)
 
 object Record {
+	implicit def opt_rec_to_term( rec: Option[Record] ): Option[Term] = rec match {
+		case Some(r) => Some(r.definition)
+		case None => None
+	}
 	implicit def rec_to_term( rec: Record ): Term = rec.definition
 	implicit def rec_to_type( rec: Record ): Type = rec.typ
+}
+
+/**
+ * Packs an implicit def to cope with Options of Terms
+ */
+object Scope {
+
+	class TermWrapper(t: Option[Term]) {
+		/**
+		 * Evaluates to left term if left is defined, and right otherwise.
+		 * Supports short circuit evaluation
+		 *
+		 * @param right not evaluated in case left is defined
+		 */
+		def ||(right: => Option[Term]): Option[Term] = {
+			if( t.isEmpty ) right else t
+		}
+	}
+
+	implicit def termWrapper(t: Option[Term]) = new TermWrapper(t)
 }
 
 class Scope(

@@ -1,6 +1,7 @@
 package minijava.analysis
 
 import minijava.parser._
+import minijava.utils.CompileException
 
 abstract sealed class AnalysisResult {
 	def and(right: AnalysisResult): AnalysisResult
@@ -44,33 +45,140 @@ case class Failure(msg: String, next: Option[ Failure ] = None) extends Analysis
 	}
 }
 
-object SemanticAnalysis {
+object SemanticAnalyzer {
 
-	def apply(term: Term, symbols: SymbolTable): AnalysisResult = {
+	def apply = analyze _
+
+	/**
+	 * Applies the different semantic analysis functions simultaneously on
+	 * a given AST, returning an AnalysisResult
+	 */
+	def analyze(term: Term, symbols: SymbolTable): AnalysisResult = {
 		term.foldDown[ AnalysisResult ](Success) {
-			// perform name analysis on this node
-			// and combine the results
-			(r, t) => r and NameAnalysis.analyze(t)(symbols)
+			(r, t) =>
+				// perform name analysis on this node
+				NameAnalyzer.analyze(t)(symbols) match {
+					// perform type analysis only when name analysis has succeeded
+					// and combine the results on failure with previous results
+					case Success => r and TypeAnalyzer.analyze(t)(symbols)
+					case f:Failure => r and f
+				}
 		}
 	}
 }
 
-object NameAnalysis {
+trait Analyzer {
 
-	def apply(term: Term, symbols: SymbolTable): AnalysisResult = analyze(term)(symbols)
+	// import some nice implicit conversions
+	// to handle optional terms/records
+	import Scope._
+	import Record._
 
-	private def check( v: Boolean, f: Failure ) = if( !v ) f else Success
+	protected def check( v: Boolean, f: Failure ) = if( !v ) f else Success
 
-	def check_def( term: Term, ns: Namespace, name: String)(implicit table: SymbolTable): Boolean = {
+	protected def get_def
+		( term: Term, nss: List[Namespace], name: String )
+		( implicit table: SymbolTable )
+		: Option[Term] = {
+
 		// get the scope
 		table.get_scope_of(term) match {
 			// verify the name is defined in the given scope
-			case Some(s) => s.lookup_lexical(ns, name) match {
-				case Some(d) => true
-				case _ => false
-			}
-			case _ => true
+			// given any of the provided namespaces
+			case Some(s) =>
+				nss.foldLeft[Option[Term]]( None ) {
+					(r, ns ) => r || s.lookup_lexical(ns, name)
+				} match {
+					case Some(d) => Some(d)
+					case _ => None
+				}
+
+			case _ => None
 		}
+	}
+}
+
+object TypeAnalyzer extends Analyzer {
+
+	/**
+	 * The type analyzer is only run on a node if it is succesfully verified by the
+	 * name-analyzer
+	 *
+	 * We can thus assume that definitions of terms exist, if the namespace is known
+	 *
+	 * @param term
+	 * @param nss namespaces to search
+	 * @param name
+	 * @param table
+	 */
+	protected def get_sure_def( term: Term, nss: List[Namespace], name: String )( implicit table: SymbolTable ): Term = {
+		super.get_def( term, nss, name ) match {
+			case Some(t) => t
+			case None => throw new CompileException( "Can't get definition of undefined reference." )
+		}
+	}
+
+	def get_type(term: Term)(implicit symbols: SymbolTable): Type = term match {
+
+		// expression types
+		case BinExp(LAnd, _, _) => TBool
+		case BinExp(Plus, _, _) => TInt
+		case BinExp(Minus, _, _) => TInt
+		case BinExp(Mul, _, _) => TInt
+		case BinExp(Lt, _, _) => TBool
+		case BinExp(Subscript, _, _) => TInt
+		case UnExp(Neg, _) => TBool
+		case UnExp(Len, _) => TInt
+		case IntValue(_) => TInt
+		case True => TBool
+		case False => TBool
+
+		// references
+		case Ref(id) => get_type(get_sure_def(term, List(NSVar, NSField), id))
+
+		// variable declarations
+		case VarDecl(typ,id) => typ
+		case Field(typ,id) => typ
+		case Param(typ,id) => typ
+
+		// method simple type
+		case MethodDecl(_,_,_,_,_, ret_exp) => get_type(ret_exp)
+
+		case _ => Void
+	}
+
+	def analyze(term:Term)(implicit symbols: SymbolTable): AnalysisResult = {
+
+		def teq( left: Type, right: Type ) = left == right
+
+		term match {
+
+			case MethodDecl(decl_rett, name, _, _, _, retexp) =>
+				val actual_rett = get_type( retexp )
+				check(
+					teq( decl_rett, actual_rett),
+					Failure( s"Actual return type $actual_rett of method `$name` doesn't match declared type $decl_rett" )
+				)
+
+			case AssignStmt(varr, exp) =>
+				val vart = get_type(get_sure_def(term, List(NSVar, NSField), varr))
+				val expt = get_type(exp)
+				check(
+					teq(vart, expt),
+					Failure( s"Expected expression of type $vart: got $expt instead" )
+				)
+
+			case _ => Success
+		}
+	}
+}
+
+object NameAnalyzer extends Analyzer {
+
+	def apply(term: Term, symbols: SymbolTable): AnalysisResult = analyze(term)(symbols)
+
+	private def check_def( term: Term, ns: Namespace, name: String)(implicit table: SymbolTable): Boolean = {
+		get_def( term, List(ns), name ).isDefined
 	}
 
 	def analyze(terms: List[ Term ])(implicit table: SymbolTable): AnalysisResult = {
