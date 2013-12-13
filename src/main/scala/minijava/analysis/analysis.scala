@@ -1,7 +1,41 @@
-package minijava.analysis
+package minijava {
 
 import minijava.parser._
 import minijava.utils.CompileException
+
+package object analysis {
+
+	type TypeResult = Either[Failure,Type]
+
+	/**
+	 * Packs some handy typetask related conversions
+	 */
+	object TypeResult {
+		
+		class WrappedTypeResult(t: TypeResult) {
+
+			/**
+			 * Conditionally evalutes anything that would evaluate to an analysisresult
+			 * given that the typeresult is succesful-ish
+			 */
+			def <::( f: => AnalysisResult ): AnalysisResult = t match {
+				case Left(fail) => fail
+				case Right(_) => f
+			}
+		}
+
+		implicit def type_to_typetask(t: Type): TypeResult = Right(t)
+		implicit def failure_to_typetask(f: Failure): TypeResult = Left(f)
+		implicit def typetask_to_result(e: Either[Failure,Type]): AnalysisResult = e match {
+			case Left(f) => f
+			case Right(t) => Success
+		}
+
+		implicit def task_to_wrappedtask(t:TypeResult): WrappedTypeResult = new WrappedTypeResult(t)
+	}
+}
+
+package analysis {
 
 abstract sealed class AnalysisResult {
 	def and(right: AnalysisResult): AnalysisResult
@@ -100,6 +134,9 @@ trait Analyzer {
 
 object TypeAnalyzer extends Analyzer {
 
+	// import some transparancy between types and typetasks
+	import TypeResult._
+
 	/**
 	 * The type analyzer is only run on a node if it is succesfully verified by the
 	 * name-analyzer
@@ -118,7 +155,7 @@ object TypeAnalyzer extends Analyzer {
 		}
 	}
 
-	def get_type(term: Term)(implicit symbols: SymbolTable): Type = term match {
+	def get_type(term: Term)(implicit symbols: SymbolTable): TypeResult = term match {
 
 		// expression types
 		case BinExp(LAnd, _, _) => TBool
@@ -144,28 +181,59 @@ object TypeAnalyzer extends Analyzer {
 		// method simple type
 		case MethodDecl(_,_,_,_,_, ret_exp) => get_type(ret_exp)
 
+		case This => get_sure_def(term, List(NSThis), "this") match {
+			case ClassDecl(c,_,_,_) => TClass(c)
+			case _ => throw new CompileException( "This referred to non-classtype" )
+		}
+
+		//case Call(inst,name,_) =>
+			// first get the type of the obj on which it is called
+			// val objt = get_type( inst )
+
+
 		case _ => Void
 	}
 
 	def analyze(term:Term)(implicit symbols: SymbolTable): AnalysisResult = {
 
-		def teq( left: Type, right: Type ) = left == right
+		def teq( left: TypeResult, right: TypeResult ) = ( left, right ) match {
+			case ( Right(lt), Right( rt) ) => lt == rt
+			case _ => false
+		}
 
 		term match {
 
+			// declared return type needs to match actual return type
 			case MethodDecl(decl_rett, name, _, _, _, retexp) =>
-				val actual_rett = get_type( retexp )
+				val actual_rett = get_type(retexp)
+
 				check(
-					teq( decl_rett, actual_rett),
-					Failure( s"Actual return type $actual_rett of method `$name` doesn't match declared type $decl_rett" )
-				)
+					teq(decl_rett, actual_rett),
+					Failure(s"Actual return type $actual_rett of method `$name` doesn't match declared type $decl_rett")
+				) <:: actual_rett
 
 			case AssignStmt(varr, exp) =>
+
 				val vart = get_type(get_sure_def(term, List(NSVar, NSField), varr))
 				val expt = get_type(exp)
-				check(
+
+				(check(
 					teq(vart, expt),
 					Failure( s"Expected expression of type $vart: got $expt instead" )
+				) <:: vart) <:: expt
+
+			case ArrayAssignStmt(_, index, value) =>
+				val valt = get_type(value)
+				val indt = get_type(index)
+
+				// expression assigned to element of int[] should be int
+				// and index in arrayassignment should be int
+				check(
+					teq(TInt, valt),
+					Failure( s"Int array assignment expects expression of type Int, got $valt instead" )
+				) and check(
+					teq(TInt, indt),
+					Failure( s"Index must be of type int, got $indt instead" )
 				)
 
 			case _ => Success
@@ -230,3 +298,5 @@ object NameAnalyzer extends Analyzer {
 		}
 	}
 }
+} //end of analysis package
+} //end of minijava package

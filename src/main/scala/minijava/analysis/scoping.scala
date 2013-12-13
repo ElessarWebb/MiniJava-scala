@@ -91,7 +91,8 @@ class Scope(
 class SymbolTable(
 	val root: Scope,
 	val current: Scope,
-	val term_in_scope: immutable.HashMap[ Term, Scope ] = new immutable.HashMap()
+	val term_in_scope:Map[Term,Scope] = new immutable.HashMap[Term, Scope](),
+	val child_scopes:Map[Term,Scope] = new immutable.HashMap[Term, Scope]()
 	) extends Immutable {
 
 	/**
@@ -104,7 +105,7 @@ class SymbolTable(
 	 */
 	def declare(ns: Namespace, id: String, term: Term, typ: Type) = {
 		val nextctx = current.add(ns, id, Record(term, typ))
-		new SymbolTable(root, nextctx, term_in_scope + Tuple2(term, nextctx))
+		new SymbolTable(root, nextctx, term_in_scope + Tuple2(term, nextctx), child_scopes)
 	}
 
 	/**
@@ -112,7 +113,7 @@ class SymbolTable(
 	 * @param term
 	 */
 	def link(term: Term) = {
-		new SymbolTable(root, current, term_in_scope + Tuple2(term, current))
+		new SymbolTable(root, current, term_in_scope + Tuple2(term, current), child_scopes)
 	}
 
 	/**
@@ -120,23 +121,30 @@ class SymbolTable(
 	 * @param scopes namespaces to scop
 	 * @return
 	 */
-	def enter_scope(scopes: List[ Namespace ]) = new SymbolTable(
-		root,
-		new Scope(Some(current), scopes),
-		term_in_scope
-	)
+	def enter_scope(scopes: List[ Namespace ], owner: Term) = {
+		val newctx = new Scope(Some(current), scopes)
+		new SymbolTable(
+			root,
+			newctx,
+			term_in_scope,
+			child_scopes + Tuple2(owner,newctx)
+		)
+	}
 
 	@throws[ IllegalArgumentException ]
 	def leave_scope() = current.parent match {
 		case Some(p) => new SymbolTable(
 			root,
 			p,
-			term_in_scope
+			term_in_scope,
+			child_scopes
 		)
 		case _ => throw new IllegalArgumentException("Cannot leave top scope")
 	}
 
 	def get_scope_of( term: Term ): Option[Scope] = this.term_in_scope.get( term )
+
+	def get_child_scope_of( term: Term ): Option[Scope] = this.child_scopes.get( term )
 }
 
 object SymbolTable {
@@ -170,7 +178,7 @@ object SymbolTable {
 				fields ::: methods,
 				ctx .declare(NSClass, id, c, clsst)
 					.declare(NSThis, "this", c, TClass(id) )
-					.enter_scope(List(NSField, NSMethod))
+					.enter_scope(List(NSField, NSMethod), c)
 			).leave_scope()
 
 		case f@Field(typ,name) => ctx.declare(NSField, name, f, typ)
@@ -186,7 +194,7 @@ object SymbolTable {
 			// and enter method scope
 			val decl =
 				ctx	.declare(NSMethod, s"$self.$name", m, typ)
-					.enter_scope(List(NSVar))
+					.enter_scope(List(NSVar), m)
 
 			// recurse on children
 			// and leave the method scope again

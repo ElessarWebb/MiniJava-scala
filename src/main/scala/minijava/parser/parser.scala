@@ -73,9 +73,13 @@ trait ExpParsers extends LiteralParsers {
 	def term_0: Parser[Exp] = ( "(" ~> exp <~ ")" ) | simple_term
 
 	// level 1 precedence
-	def term_1: Parser[Exp] = ( term_0 <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
+	def call: Parser[Exp] = ( term_0 <~ "." ) ~ id ~ ( "(" ~> repsep( exp, "," ) <~ ")" ) ^^ {
 		case ( obj ) ~ id ~ ( args ) => Call( obj, id, args )
-	} | term_0
+	}
+	def subscript: Parser[Exp] = term_0 ~ ( "[" ~> exp <~ "]" ) ^^ {
+		case arr ~ ( index ) => BinExp( Subscript, arr, index )
+	}
+	def term_1: Parser[Exp] = call | subscript | term_0
 
 	def create_array: Parser[Exp] = new_kw ~> "int" ~> "[" ~> exp <~ "]" ^^ { case exp => NewArray(exp) }
 	def create_obj: Parser[Exp] = new_kw ~> id <~ ( "(" ~ ")" ) ^^ { case id => NewObject( id ) }
