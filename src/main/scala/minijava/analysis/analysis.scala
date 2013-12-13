@@ -37,6 +37,8 @@ package object analysis {
 
 package analysis {
 
+import com.sun.org.apache.xalan.internal.xsltc.compiler.CompilerException
+
 abstract sealed class AnalysisResult {
 	def and(right: AnalysisResult): AnalysisResult
 }
@@ -54,7 +56,7 @@ case class Failure(msg: String, next: Option[ Failure ] = None) extends Analysis
 
 	implicit def failToOpt(f: Failure) = Some(f)
 
-	def and(right: AnalysisResult) = right match {
+	def and(right: AnalysisResult): Failure = right match {
 		case f: Failure => Failure(msg, f)
 		case Success => this
 	}
@@ -110,6 +112,25 @@ trait Analyzer {
 
 	protected def check( v: Boolean, f: Failure ) = if( !v ) f else Success
 
+	protected def get_def_on( term:Term, nss:List[Namespace], name: String )( implicit symbols: SymbolTable ): Option[Term] = {
+		// get the scope that belongs to term
+		symbols.get_child_scope_of( term ) match {
+			// if scope was retrieved succesfully
+			// get the definition of name in it
+			case Some(s) => get_def( s, List(NSMethod), name)
+			case None => throw new CompilerException( s"Could not get scope of term $term" )
+		}
+	}
+
+	protected def get_def(scope: Scope, nss: List[ Namespace ], name: String): Option[Term] = {
+		nss.foldLeft[Option[Term]]( None ) {
+			(r, ns ) => r || scope.lookup_lexical(ns, name)
+		} match {
+			case Some(d) => Some(d)
+			case _ => None
+		}
+	}
+
 	protected def get_def
 		( term: Term, nss: List[Namespace], name: String )
 		( implicit table: SymbolTable )
@@ -119,13 +140,7 @@ trait Analyzer {
 		table.get_scope_of(term) match {
 			// verify the name is defined in the given scope
 			// given any of the provided namespaces
-			case Some(s) =>
-				nss.foldLeft[Option[Term]]( None ) {
-					(r, ns ) => r || s.lookup_lexical(ns, name)
-				} match {
-					case Some(d) => Some(d)
-					case _ => None
-				}
+			case Some(s) => get_def( s, nss, name )
 
 			case _ => None
 		}
@@ -169,6 +184,8 @@ object TypeAnalyzer extends Analyzer {
 		case IntValue(_) => TInt
 		case True => TBool
 		case False => TBool
+		case NewObject(c) => TClass(c)
+		case NewArray(_) => TIntArray
 
 		// references
 		case Ref(id) => get_type(get_sure_def(term, List(NSVar, NSField), id))
@@ -179,17 +196,29 @@ object TypeAnalyzer extends Analyzer {
 		case Param(typ,id) => typ
 
 		// method simple type
-		case MethodDecl(_,_,_,_,_, ret_exp) => get_type(ret_exp)
+		case MethodDecl(t,_,_,_,_,_) => t
 
 		case This => get_sure_def(term, List(NSThis), "this") match {
 			case ClassDecl(c,_,_,_) => TClass(c)
 			case _ => throw new CompileException( "This referred to non-classtype" )
 		}
 
-		//case Call(inst,name,_) =>
+		case Call(inst, name, _) =>
 			// first get the type of the obj on which it is called
-			// val objt = get_type( inst )
+			val objt = get_type(inst)
 
+			// make sure it is an instance of something
+			objt match {
+
+				// if so: lookup the definition of this method
+				case Right(TClass(c)) =>
+					get_def_on(get_sure_def(term, List(NSClass), c), List(NSMethod), name) match {
+						case Some(m) => get_type(m)
+						case None => Failure(s"Call to unknown method `$name` on instance of type `$c`")
+					}
+
+				case Left(f) => f and Failure(s"Call on non-object of type $objt")
+			}
 
 		case _ => Void
 	}
@@ -201,6 +230,11 @@ object TypeAnalyzer extends Analyzer {
 			case _ => false
 		}
 
+		def typeres_to_type( result: TypeResult ) = result match {
+			case Left(f) => throw new CompilerException("Tried to use type, but typeresult was a failure")
+			case Right(typ) => typ
+		}
+
 		term match {
 
 			// declared return type needs to match actual return type
@@ -209,7 +243,10 @@ object TypeAnalyzer extends Analyzer {
 
 				check(
 					teq(decl_rett, actual_rett),
-					Failure(s"Actual return type $actual_rett of method `$name` doesn't match declared type $decl_rett")
+					Failure(
+						s"Actual return type ${typeres_to_type(actual_rett)} of method `$name` doesn't " +
+						s"match declared type ${typeres_to_type(decl_rett)}"
+					)
 				) <:: actual_rett
 
 			case AssignStmt(varr, exp) =>
@@ -219,7 +256,10 @@ object TypeAnalyzer extends Analyzer {
 
 				(check(
 					teq(vart, expt),
-					Failure( s"Expected expression of type $vart: got $expt instead" )
+					Failure(
+						s"Expected expression of type ${typeres_to_type(vart)}: " +
+						s"got ${typeres_to_type(expt)} instead"
+					)
 				) <:: vart) <:: expt
 
 			case ArrayAssignStmt(_, index, value) =>
@@ -230,10 +270,13 @@ object TypeAnalyzer extends Analyzer {
 				// and index in arrayassignment should be int
 				check(
 					teq(TInt, valt),
-					Failure( s"Int array assignment expects expression of type Int, got $valt instead" )
+					Failure(
+						s"Int array assignment expects expression of type Int, " +
+						s"got ${typetask_to_result(valt)} instead"
+					)
 				) and check(
 					teq(TInt, indt),
-					Failure( s"Index must be of type int, got $indt instead" )
+					Failure( s"Index must be of type int, got ${typetask_to_result(indt)} instead" )
 				)
 
 			case _ => Success

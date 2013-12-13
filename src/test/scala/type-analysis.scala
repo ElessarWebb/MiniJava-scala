@@ -133,7 +133,7 @@ class TypeAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 			""".stripMargin)
 	}
 
-	it should "correctly deduce type of call to int method" in {
+	it should "correctly deduce type of call to method on self" in {
 		positive(
 			"""
 			  | class A {
@@ -144,6 +144,61 @@ class TypeAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 			  |     }
 			  | }
 			""".stripMargin)
+	}
+
+	it should "correctly deduce type of call to method on other instance of self" in {
+		positive(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		A inst;
+			  |     	inst = new A();
+			  |   		a = inst.b();
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin)
+	}
+
+	it should "correctly deduce type of call to method on instance of other class" in {
+		positive(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		B inst;
+			  |     	inst = new B();
+			  |   		a = inst.c();
+			  |    		return 1;
+			  |     }
+			  | }
+			  | class B {
+			  | 	public int c() {
+			  |  		return 1;
+			  |   	}
+			  | }
+			""".stripMargin)
+	}
+
+	it should "fail on assignment with call to method of wrong type" in {
+		negative(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		B inst;
+			  |     	inst = new B();
+			  |   		a = inst.c();
+			  |    		return 1;
+			  |     }
+			  | }
+			  | class B {
+			  | 	public boolean c() {
+			  |  		return true;
+			  |   	}
+			  | }
+			""".stripMargin, "expected expression" )
 	}
 
 	it should "fail on bool assigned to int array element" in {

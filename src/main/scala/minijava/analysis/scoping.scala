@@ -193,7 +193,7 @@ object SymbolTable {
 			// declare the method in the parent scope
 			// and enter method scope
 			val decl =
-				ctx	.declare(NSMethod, s"$self.$name", m, typ)
+				ctx	.declare(NSMethod, name, m, typ)
 					.enter_scope(List(NSVar), m)
 
 			// recurse on children
