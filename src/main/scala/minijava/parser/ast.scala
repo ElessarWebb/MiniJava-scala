@@ -36,7 +36,9 @@ package parser {
 	sealed abstract class Statement extends Term
 	sealed abstract class Exp extends Term
 
-	sealed abstract class BinOp
+	sealed abstract class Op
+
+	sealed abstract class BinOp extends Op
 	case object Plus extends BinOp
 	case object Minus extends BinOp
 	case object Mul extends BinOp
@@ -44,7 +46,7 @@ package parser {
 	case object Lt extends BinOp
 	case object Subscript extends BinOp
 
-	sealed abstract class UnOp
+	sealed abstract class UnOp extends Op
 	case object Neg extends UnOp
 	case object Len extends UnOp
 

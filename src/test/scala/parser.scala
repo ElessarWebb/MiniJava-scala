@@ -37,7 +37,7 @@ class ExpParsersSpec extends FlatSpec with ParserSpec with Matchers {
 
 	protected def parse( s:String ): Exp = {
 		ExpressionParser( s ) match {
-			case Some( exp ) => exp
+			case ExpressionParser.Success( exp:Exp, _ ) => exp
 			case _ => throw new ParseException()
 		}
 	}
@@ -119,7 +119,7 @@ class MiniJavaParserSpec extends FlatSpec with ParserSpec with Matchers {
 
 	protected def parse( s:String ): Program = {
 		Parser( s ) match {
-			case Some( program ) => program
+			case Parser.Success(program:Program, _) => program
 			case _ => throw new ParseException()
 		}
 	}

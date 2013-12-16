@@ -252,4 +252,83 @@ class TypeAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 			  | }
 			""".stripMargin)
 	}
+
+	it should "fail on boolean use as left operand of sum" in {
+		negative(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		a = 1 + true;
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin, "right operand" )
+	}
+
+	it should "fail on boolean use as left operand of subtraction" in {
+		negative(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		a = 1 - true;
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin, "right operand" )
+	}
+
+	it should "fail on boolean use as left operand of subscript" in {
+		negative(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		a = true[1];
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin, "left operand" )
+	}
+
+	it should "succeed on intarray use as left operand of subscript" in {
+		positive(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		int[] b;
+			  |   		a = b[1];
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin)
+	}
+
+	it should "succeed on ints as operand of addition" in {
+		positive(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		a = 1 + a;
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin)
+	}
+
+	it should "succeed on ints as operand of subtraction" in {
+		positive(
+			"""
+			  | class A {
+			  | 	int a;
+			  |  	public int b() {
+			  |   		a = 1 - this.b();
+			  |    		return 1;
+			  |     }
+			  | }
+			""".stripMargin)
+	}
 }

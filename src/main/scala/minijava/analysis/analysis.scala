@@ -18,9 +18,14 @@ package object analysis {
 			 * Conditionally evalutes anything that would evaluate to an analysisresult
 			 * given that the typeresult is succesful-ish
 			 */
-			def <::( f: => AnalysisResult ): AnalysisResult = t match {
+			def <::(f: => AnalysisResult): AnalysisResult = t match {
 				case Left(fail) => fail
 				case Right(_) => f
+			}
+
+			def +(right: TypeResult): TypeResult = t match {
+				case l@Left(_) => l
+				case r@Right(_) => right
 			}
 		}
 
@@ -223,6 +228,16 @@ object TypeAnalyzer extends Analyzer {
 		case _ => Void
 	}
 
+	def get_op_type(op: Op): (Type, Type) = op match {
+		case Plus => (TInt, TInt)
+		case Mul => (TInt, TInt)
+		case Minus => (TInt, TInt)
+		case Lt => (TInt, TInt)
+		case Subscript => (TIntArray, TInt)
+		case Neg => (TBool, Void)
+		case Len => (TIntArray, Void)
+	}
+
 	def analyze(term:Term)(implicit symbols: SymbolTable): AnalysisResult = {
 
 		def teq( left: TypeResult, right: TypeResult ) = ( left, right ) match {
@@ -254,13 +269,13 @@ object TypeAnalyzer extends Analyzer {
 				val vart = get_type(get_sure_def(term, List(NSVar, NSField), varr))
 				val expt = get_type(exp)
 
-				(check(
+				check(
 					teq(vart, expt),
 					Failure(
 						s"Expected expression of type ${typeres_to_type(vart)}: " +
 						s"got ${typeres_to_type(expt)} instead"
 					)
-				) <:: vart) <:: expt
+				) <:: (vart + expt)
 
 			case ArrayAssignStmt(_, index, value) =>
 				val valt = get_type(value)
@@ -277,7 +292,27 @@ object TypeAnalyzer extends Analyzer {
 				) and check(
 					teq(TInt, indt),
 					Failure( s"Index must be of type int, got ${typetask_to_result(indt)} instead" )
-				)
+				) <:: (valt + indt)
+
+			case BinExp( op, left, right ) =>
+				val top = get_op_type( op )
+				val tleft = get_type(left)
+				val tright = get_type(right)
+				check(
+					teq(top._1, tleft),
+					Failure(s"Left operand of $op should be of type $top")
+				) and check(
+					teq(top._2, tright),
+					Failure(s"Right operand of $op should be of type $top")
+				) <:: (tleft + tright)
+
+			case UnExp( op, oper ) =>
+				val top = get_op_type( op )
+				val toper = get_type(oper)
+				check(
+					teq(top._1, toper),
+					Failure(s"Left operand of $op should be of type $top")
+				) <:: toper
 
 			case _ => Success
 		}

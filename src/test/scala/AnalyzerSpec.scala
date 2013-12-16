@@ -12,8 +12,9 @@ trait AnalyzerSpec extends Matchers {
 
 	protected def setup(input: String): (Program, SymbolTable) = {
 		Parser(header + input) match {
-			case Some(p: Program) => (p, SymbolTable.build(p))
-			case _ => throw new TestFailedException("Sorry, test input won't parse as program", 1)
+			case Parser.Success(p: Program, _) => (p, SymbolTable.build(p))
+			case Parser.Failure(msg, _) =>
+				throw new TestFailedException(s"Sorry, test input won't parse as program: $msg", 1)
 		}
 	}
 

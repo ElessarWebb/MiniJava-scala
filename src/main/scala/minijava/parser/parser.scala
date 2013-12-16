@@ -40,10 +40,7 @@ trait LiteralParsers extends RegexParsers {
 }
 
 object ExpressionParser extends ExpParsers {
-	def apply( input: String ): Option[Exp] = super.parseAll( exp, input ) match {
-		case Success( exp, _ ) => Some(exp)
-		case _ => None
-	}
+	def apply( input: String ): ParseResult[Exp] = super.parseAll( exp, input )
 }
 
 /**
@@ -202,10 +199,7 @@ trait Parsers extends LiteralParsers with ExpParsers {
 }
 
 object Parser extends Parsers {
-	def apply( input: String ): Option[Program] = {
-		parseAll( program, input ) match {
-			case Success( program, _ ) => Some(program)
-			case _ => None
-		}
+	def apply( input: String ): ParseResult[Program] = {
+		parseAll( program, input )
 	}
 }
