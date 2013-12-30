@@ -18,7 +18,7 @@ trait AnalyzerSpec extends Matchers {
 		}
 	}
 
-	protected def exec(input: String): AnalysisResult
+	protected def exec(input: String): AnalysisResult[Boolean]
 
 	def negative(input: String, substr: String = "") = {
 		val result = exec(input)
@@ -27,6 +27,6 @@ trait AnalyzerSpec extends Matchers {
 	}
 
 	def positive(input: String) = {
-		exec(input) should equal(Success)
+		exec(input) should equal(Success(true))
 	}
 }

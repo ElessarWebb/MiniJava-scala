@@ -14,7 +14,7 @@ class TypeAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 
 	behavior of "The type analyzer"
 
-	override protected def exec( input: String ): AnalysisResult = {
+	override protected def exec( input: String ): AnalysisResult[Boolean] = {
 		val inp = setup( input )
 		SemanticAnalyzer.analyze(inp._1, inp._2)
 	}

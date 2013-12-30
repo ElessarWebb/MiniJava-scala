@@ -14,12 +14,12 @@ class NameAnalyzerSpec extends FlatSpec with AnalyzerSpec {
 
 	behavior of "The name analyzer"
 
-	override protected def exec( input: String ): AnalysisResult = {
+	override protected def exec( input: String ): AnalysisResult[Boolean] = {
 		val inp = setup( input )
-		inp._1.foldDown[ AnalysisResult ](Success) {
+		inp._1.foldDown[AnalysisResult[Boolean]](Success(true)) {
 			// perform name analysis on this node
 			// and combine the results
-			(r, t) => r and NameAnalyzer.analyze(t)(inp._2)
+			(r, t) => r & NameAnalyzer.analyze(t)(inp._2)
 		}
 	}
 

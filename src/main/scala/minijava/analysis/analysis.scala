@@ -1,70 +1,78 @@
-package minijava {
+package minijava.analysis {
 
 import minijava.parser._
 import minijava.utils.CompileException
 
-package object analysis {
+case class AnalysisException(msg:String) extends CompileException(msg)
 
-	type TypeResult = Either[Failure,Type]
+object AnalysisResult {
+	implicit def opt_to_result[A]( opt: Option[A] ): AnalysisResult[A] = opt match {
+		case None => Failure( "Error" )
+		case Some(x) => Success(x)
+	}
+
+	def apply[T](x: => T) =
+		try Success(x)
+		catch {
+			case AnalysisException(msg) => Failure(msg, None)
+		}
+}
+
+abstract sealed class AnalysisResult[+T] {
 
 	/**
-	 * Packs some handy typetask related conversions
+	 * Combines two analysis results into a single one
+	 *
+	 * 	left	right	result
+	 * 	----------------------
+	 * 	Suc(a)	Suc(b)	Suc(b)
+	 * 	Suc(a)	Fail(m)	Fail(m)
+	 * 	Fail(m)	Suc(b)	Fail(m)
+	 * 	Fail(m1)Fail(m2)chain of right failure llist and then left llist
 	 */
-	object TypeResult {
-		
-		class WrappedTypeResult(t: TypeResult) {
+	def &[U >: T](right: AnalysisResult[U]): AnalysisResult[U] = (this,right) match {
+		// success is temporary
+		case (l@Success(_), r) => r
+		// failure prevails
+		case (l@Failure(msg,f), r@Success(_)) => Failure(msg,f)
+		// concat the chains of failures
+		case (l@Failure(_,_), r@Failure(_,_)) => r.foldRight(l) { (r,x) => Failure( x.msg, Some(r)) }
+	}
 
-			/**
-			 * Conditionally evalutes anything that would evaluate to an analysisresult
-			 * given that the typeresult is succesful-ish
-			 */
-			def <::(f: => AnalysisResult): AnalysisResult = t match {
-				case Left(fail) => fail
-				case Right(_) => f
-			}
+	/**
+	 * Combines two analysis results into a single one
+	 *
+	 * 	left	right	result
+	 * 	----------------------
+	 * 	Suc(a)	Suc(b)	Suc(a)
+	 * 	Suc(a)	Fail(m)	Suc(a)
+	 * 	Fail(m)	Suc(b)	Suc(b)
+	 * 	Fail(m1)Fail(m2)Fail(m2)
+	 *
+	 * @param right
+	 * @return
+	 */
+	def |[U >: T](right: AnalysisResult[U]): AnalysisResult[U] = (this,right) match {
+		case (l:Success[T],_) => l
+		case (l:Failure,r) => r
+	}
 
-			def +(right: TypeResult): TypeResult = t match {
-				case l@Left(_) => l
-				case r@Right(_) => right
-			}
-		}
+	def flatMap[U](f: T => AnalysisResult[U]): AnalysisResult[U] = this match {
+		case Success(t) => f(t)
+		case fail: Failure => fail
+	}
 
-		implicit def type_to_typetask(t: Type): TypeResult = Right(t)
-		implicit def failure_to_typetask(f: Failure): TypeResult = Left(f)
-		implicit def typetask_to_result(e: Either[Failure,Type]): AnalysisResult = e match {
-			case Left(f) => f
-			case Right(t) => Success
-		}
-
-		implicit def task_to_wrappedtask(t:TypeResult): WrappedTypeResult = new WrappedTypeResult(t)
+	def map[U](f: T => U): AnalysisResult[U] = this match {
+		case Success(t) => AnalysisResult(f(t))
+		case fail: Failure => fail
 	}
 }
 
-package analysis {
+case class Success[T](result: T) extends AnalysisResult[T]
 
-import com.sun.org.apache.xalan.internal.xsltc.compiler.CompilerException
-
-abstract sealed class AnalysisResult {
-	def and(right: AnalysisResult): AnalysisResult
-}
-
-case object Success extends AnalysisResult {
-
-	def and(right: AnalysisResult) = right match {
-		case Success => Success
-		case r: Failure => r
-	}
-
-}
-
-case class Failure(msg: String, next: Option[ Failure ] = None) extends AnalysisResult {
+case class Failure(msg: String, next: Option[ Failure ] = None) extends AnalysisResult[Nothing] {
 
 	implicit def failToOpt(f: Failure) = Some(f)
-
-	def and(right: AnalysisResult): Failure = right match {
-		case f: Failure => Failure(msg, f)
-		case Success => this
-	}
 
 	override def toString: String = {
 		val s = s"$msg"
@@ -75,15 +83,21 @@ case class Failure(msg: String, next: Option[ Failure ] = None) extends Analysis
 		} else s
 	}
 
-	private def len(): Int = next match {
-		case Some(f) => 1 + f.len()
-		case None => 1
+	private def len(): Int = foldLeft(0) {(r,e) => r + 1 }
+
+	final def foldLeft[A](z: A)(f: (A,Failure) => A): A = next match {
+		// apply to self, then to child
+		case Some(fail) => fail.foldLeft(f(z, this))(f)
+		case None => f(z,this)
 	}
 
-	def msgs(): List[String] = this.next match {
-		case Some(f) => msg :: f.msgs()
-		case _ => List( msg )
+	final def foldRight[A](z: A)(f: (A,Failure) => A): A = next match {
+		// apply to child, then to self
+		case Some(fail) => f(fail.foldLeft(z)(f), this)
+		case None => f(z,this)
 	}
+
+	def msgs() = foldLeft[List[String]](Nil) { (r, e) => e.msg :: r }
 }
 
 object SemanticAnalyzer {
@@ -94,15 +108,15 @@ object SemanticAnalyzer {
 	 * Applies the different semantic analysis functions simultaneously on
 	 * a given AST, returning an AnalysisResult
 	 */
-	def analyze(term: Term, symbols: SymbolTable): AnalysisResult = {
-		term.foldDown[ AnalysisResult ](Success) {
+	def analyze(term: Term, symbols: SymbolTable) = {
+		term.foldDown[AnalysisResult[Boolean]](Success(true)) {
 			(r, t) =>
 				// perform name analysis on this node
 				NameAnalyzer.analyze(t)(symbols) match {
 					// perform type analysis only when name analysis has succeeded
 					// and combine the results on failure with previous results
-					case Success => r and TypeAnalyzer.analyze(t)(symbols)
-					case f:Failure => r and f
+					case l:Success[Boolean] => r.flatMap { _ => TypeAnalyzer.analyze(t)(symbols) }
+					case l:Failure => l & r
 				}
 		}
 	}
@@ -115,24 +129,22 @@ trait Analyzer {
 	import Scope._
 	import Record._
 
-	protected def check( v: Boolean, f: Failure ) = if( !v ) f else Success
+	protected def check( v: Boolean, f: Failure ): AnalysisResult[Boolean] = if( !v ) f else Success(true)
 
-	protected def get_def_on( term:Term, nss:List[Namespace], name: String )( implicit symbols: SymbolTable ): Option[Term] = {
+	protected def get_def_on( term:Term, nss:List[Namespace], name: String )
+		( implicit symbols: SymbolTable ): Option[Term] = {
 		// get the scope that belongs to term
 		symbols.get_child_scope_of( term ) match {
 			// if scope was retrieved succesfully
 			// get the definition of name in it
 			case Some(s) => get_def( s, List(NSMethod), name)
-			case None => throw new CompilerException( s"Could not get scope of term $term" )
+			case None => throw new CompileException( s"Could not get scope of term $term" )
 		}
 	}
 
 	protected def get_def(scope: Scope, nss: List[ Namespace ], name: String): Option[Term] = {
 		nss.foldLeft[Option[Term]]( None ) {
 			(r, ns ) => r || scope.lookup_lexical(ns, name)
-		} match {
-			case Some(d) => Some(d)
-			case _ => None
 		}
 	}
 
@@ -142,20 +154,16 @@ trait Analyzer {
 		: Option[Term] = {
 
 		// get the scope
-		table.get_scope_of(term) match {
-			// verify the name is defined in the given scope
-			// given any of the provided namespaces
-			case Some(s) => get_def( s, nss, name )
-
-			case _ => None
-		}
+		// verify the name is defined in the given scope
+		// given any of the provided namespaces
+		table.get_scope_of(term).flatMap { get_def(_, nss, name) }
 	}
 }
 
 object TypeAnalyzer extends Analyzer {
 
-	// import some transparancy between types and typetasks
-	import TypeResult._
+	// some transparancy between option type and AnalysisResult
+	import AnalysisResult._
 
 	/**
 	 * The type analyzer is only run on a node if it is succesfully verified by the
@@ -171,11 +179,13 @@ object TypeAnalyzer extends Analyzer {
 	protected def get_sure_def( term: Term, nss: List[Namespace], name: String )( implicit table: SymbolTable ): Term = {
 		super.get_def( term, nss, name ) match {
 			case Some(t) => t
-			case None => throw new CompileException( "Can't get definition of undefined reference." )
+			case None => throw new AnalysisException( "Can't get definition of undefined reference." )
 		}
 	}
 
-	def get_type(term: Term)(implicit symbols: SymbolTable): TypeResult = term match {
+	implicit def type_to_result(x:Type) = Success(x)
+
+	def get_type(term: Term)(implicit symbols: SymbolTable): AnalysisResult[Type] = term match {
 
 		// expression types
 		case BinExp(LAnd, _, _) => TBool
@@ -210,19 +220,19 @@ object TypeAnalyzer extends Analyzer {
 
 		case Call(inst, name, _) =>
 			// first get the type of the obj on which it is called
-			val objt = get_type(inst)
+			// and ensure it's a classy thing
+			get_type(inst).flatMap[Type] {
+				case TClass(c) =>
+					val cdef = get_sure_def(term,List(NSClass), c)
 
-			// make sure it is an instance of something
-			objt match {
+					// try get the definition of the method
+					// ensuring that we did find the definition of the metho
+					(	get_def_on(cdef, List(NSMethod), name)
+					 	| Failure( s"Could not resolve method $name on object of class $c" )
+					).flatMap { get_type }
 
-				// if so: lookup the definition of this method
-				case Right(TClass(c)) =>
-					get_def_on(get_sure_def(term, List(NSClass), c), List(NSMethod), name) match {
-						case Some(m) => get_type(m)
-						case None => Failure(s"Call to unknown method `$name` on instance of type `$c`")
-					}
-
-				case Left(f) => f and Failure(s"Call on non-object of type $objt")
+				// if not classy, we need a reprimand
+				case t => Failure(s"Call on non-object of type $t")
 			}
 
 		case _ => Void
@@ -236,104 +246,99 @@ object TypeAnalyzer extends Analyzer {
 		case Subscript => (TIntArray, TInt)
 		case Neg => (TBool, Void)
 		case Len => (TIntArray, Void)
+		case LAnd => (TBool, TBool)
 	}
 
-	def analyze(term:Term)(implicit symbols: SymbolTable): AnalysisResult = {
+	private def assert_type( left: Type, right: Type, fail_msg: String ): Boolean = {
+		if( left != right )
+			throw AnalysisException(fail_msg)
+		else true
+	}
 
-		def teq( left: TypeResult, right: TypeResult ) = ( left, right ) match {
-			case ( Right(lt), Right( rt) ) => lt == rt
-			case _ => false
-		}
-
-		def typeres_to_type( result: TypeResult ) = result match {
-			case Left(f) => throw new CompilerException("Tried to use type, but typeresult was a failure")
-			case Right(typ) => typ
-		}
+	def analyze(term:Term)(implicit symbols: SymbolTable): AnalysisResult[Boolean] = {
 
 		term match {
 
 			// declared return type needs to match actual return type
 			case MethodDecl(decl_rett, name, _, _, _, retexp) =>
-				val actual_rett = get_type(retexp)
-
-				check(
-					teq(decl_rett, actual_rett),
-					Failure(
-						s"Actual return type ${typeres_to_type(actual_rett)} of method `$name` doesn't " +
-						s"match declared type ${typeres_to_type(decl_rett)}"
+				get_type(retexp).flatMap { actual_rett =>
+					check(
+						decl_rett == actual_rett,
+						Failure(
+							s"Actual return type $actual_rett of method `$name` doesn't " +
+							s"match declared type $decl_rett"
+						)
 					)
-				) <:: actual_rett
+				}
 
 			case AssignStmt(varr, exp) =>
 
-				val vart = get_type(get_sure_def(term, List(NSVar, NSField), varr))
-				val expt = get_type(exp)
-
-				check(
-					teq(vart, expt),
-					Failure(
-						s"Expected expression of type ${typeres_to_type(vart)}: " +
-						s"got ${typeres_to_type(expt)} instead"
+				for {
+					vart <- get_type(get_sure_def(term, List(NSVar, NSField), varr))
+					expt <- get_type(exp)
+				} yield {
+					assert_type(vart, expt,
+						s"Expected expression of type $vart: " +
+						s"got $expt instead"
 					)
-				) <:: (vart + expt)
+				}
 
 			case ArrayAssignStmt(_, index, value) =>
-				val valt = get_type(value)
-				val indt = get_type(index)
 
-				// expression assigned to element of int[] should be int
-				// and index in arrayassignment should be int
-				check(
-					teq(TInt, valt),
-					Failure(
+				for {
+					valt <- get_type(value)
+					indt <- get_type(index)
+				} yield {
+					// expression assigned to element of int[] should be int
+					// and index in arrayassignment should be int
+					assert_type( valt, TInt,
 						s"Int array assignment expects expression of type Int, " +
-						s"got ${typetask_to_result(valt)} instead"
+						s"got $valt instead"
+					) && assert_type( indt, TInt,
+						s"Index must be of type int, got $indt instead"
 					)
-				) and check(
-					teq(TInt, indt),
-					Failure( s"Index must be of type int, got ${typetask_to_result(indt)} instead" )
-				) <:: (valt + indt)
+				}
 
 			case BinExp( op, left, right ) =>
 				val top = get_op_type( op )
-				val tleft = get_type(left)
-				val tright = get_type(right)
-				check(
-					teq(top._1, tleft),
-					Failure(s"Left operand of $op should be of type $top")
-				) and check(
-					teq(top._2, tright),
-					Failure(s"Right operand of $op should be of type $top")
-				) <:: (tleft + tright)
+
+				for {
+					tleft <- get_type(left)
+					tright <- get_type(right)
+				} yield {
+					(assert_type(top._1, tleft, s"Left operand of $op should be of type $top")
+					&& assert_type(top._2, tright, s"Right operand of $op should be of type $top"))
+				}
 
 			case UnExp( op, oper ) =>
 				val top = get_op_type( op )
-				val toper = get_type(oper)
-				check(
-					teq(top._1, toper),
-					Failure(s"Left operand of $op should be of type $top")
-				) <:: toper
+				get_type(oper).flatMap { opert =>
+					check(
+						opert == top._1,
+						Failure(s"Left operand of $op should be of type $top")
+					)
+				}
 
-			case _ => Success
+			case _ => Success(true)
 		}
 	}
 }
 
 object NameAnalyzer extends Analyzer {
 
-	def apply(term: Term, symbols: SymbolTable): AnalysisResult = analyze(term)(symbols)
+	def apply(term: Term, symbols: SymbolTable) = analyze(term)(symbols)
 
 	private def check_def( term: Term, ns: Namespace, name: String)(implicit table: SymbolTable): Boolean = {
 		get_def( term, List(ns), name ).isDefined
 	}
 
-	def analyze(terms: List[ Term ])(implicit table: SymbolTable): AnalysisResult = {
-		terms.foldLeft[ AnalysisResult ](Success) {
-			(r, t) => r and analyze(t)
+	def analyze(terms: List[ Term ])(implicit table: SymbolTable):AnalysisResult[Boolean] = {
+		terms.foldLeft[AnalysisResult[Boolean]] (Success(true)) {
+			(r, t) => r.flatMap[Boolean] { _ => analyze(t) }
 		}
 	}
 
-	def analyze(term: Term)(implicit symbols: SymbolTable): AnalysisResult = {
+	def analyze(term: Term)(implicit symbols: SymbolTable): AnalysisResult[Boolean] = {
 
 		term match {
 
@@ -372,9 +377,8 @@ object NameAnalyzer extends Analyzer {
 				Failure(s"Missing definition of class $c found.")
 			)
 
-			case _ => Success
+			case _ => Success(true)
 		}
 	}
 }
 } //end of analysis package
-} //end of minijava package
